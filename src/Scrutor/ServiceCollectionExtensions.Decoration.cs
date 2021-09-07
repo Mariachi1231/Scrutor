@@ -289,7 +289,7 @@ namespace Microsoft.Extensions.DependencyInjection
             throw error;
         }
 
-        private static bool TryDecorateDescriptors(this IServiceCollection services, Type serviceType, [NotNullWhen(false)] out Exception? error, Func<ServiceDescriptor, ServiceDescriptor> decorator)
+        public static bool TryDecorateDescriptors(this IServiceCollection services, Type serviceType, [NotNullWhen(false)] out Exception? error, Func<ServiceDescriptor, ServiceDescriptor> decorator)
         {
             if (!services.TryGetDescriptors(serviceType, out var descriptors))
             {
@@ -307,6 +307,85 @@ namespace Microsoft.Extensions.DependencyInjection
             return true;
         }
 
+        #region Old
+
+        public static bool TryDecorateOld(this IServiceCollection services, Type serviceType, Type decoratorType)
+        {
+            Preconditions.NotNull(services, nameof(services));
+            Preconditions.NotNull(serviceType, nameof(serviceType));
+            Preconditions.NotNull(decoratorType, nameof(decoratorType));
+
+            if (serviceType.IsOpenGeneric() && decoratorType.IsOpenGeneric())
+            {
+                return services.TryDecorateOpenGenericOld(serviceType, decoratorType, out _);
+            }
+
+            return services.TryDecorateDescriptorsOld(serviceType, out _, x => x.Decorate(decoratorType));
+        }
+
+        private static bool TryDecorateOpenGenericOld(this IServiceCollection services, Type serviceType, Type decoratorType, [NotNullWhen(false)] out Exception? error)
+        {
+            var closedGenericServiceTypes = services
+                .Where(x => !x.ServiceType.IsGenericTypeDefinition)
+                .Where(x => HasSameTypeDefinition(x.ServiceType, serviceType))
+                .Select(x => x.ServiceType)
+                .Distinct()
+                .ToList();
+
+            if (closedGenericServiceTypes.Count == 0)
+            {
+                error = new MissingTypeRegistrationException(serviceType);
+                return false;
+            }
+
+            foreach (var closedGenericServiceType in closedGenericServiceTypes)
+            {
+                var arguments = closedGenericServiceType.GenericTypeArguments;
+
+                var closedServiceType = serviceType.MakeGenericType(arguments);
+                try
+                {
+                    var closedDecoratorType = decoratorType.MakeGenericType(arguments);
+                    if (!services.TryDecorateDescriptorsOld(closedServiceType, out error, x => x.Decorate(closedDecoratorType)))
+                    {
+                        return false;
+                    }
+                }
+                catch (ArgumentException) { }
+            }
+
+            error = default;
+            return true;
+        }
+
+
+        public static bool TryDecorateDescriptorsOld(this IServiceCollection services, Type serviceType, [NotNullWhen(false)] out Exception? error, Func<ServiceDescriptor, ServiceDescriptor> decorator)
+        {
+            if (!services.TryGetDescriptorsOld(serviceType, out var descriptors))
+            {
+                error = new MissingTypeRegistrationException(serviceType);
+                return false;
+            }
+
+            foreach (var descriptor in descriptors)
+            {
+                var index = services.IndexOf(descriptor);
+
+                // To avoid reordering descriptors, in case a specific order is expected.
+                services[index] = decorator(descriptor);
+            }
+
+            error = default;
+            return true;
+        }
+
+        private static bool TryGetDescriptorsOld(this IServiceCollection services, Type serviceType, out ICollection<ServiceDescriptor> descriptors)
+        {
+            return (descriptors = services.Where(service => service.ServiceType == serviceType).ToArray()).Any();
+        }
+
+        #endregion
+
         private static bool TryGetDescriptors(this IServiceCollection services, Type serviceType, out IReadOnlyList<(int Position, ServiceDescriptor Value)> descriptors)
         {
             IEnumerable<(int Position, ServiceDescriptor Value)> __GetDescriptors()
@@ -320,6 +399,16 @@ namespace Microsoft.Extensions.DependencyInjection
             }
 
             descriptors = __GetDescriptors().ToArray();
+
+            //var result = new List<(int, ServiceDescriptor)>();
+            //for (int i = 0; i < services.Count; ++i)
+            //{
+            //    ServiceDescriptor serviceDescriptor = services[i];
+            //    if (serviceDescriptor.ServiceType == serviceType)
+            //        result.Add((i, serviceDescriptor));
+            //}
+
+            //descriptors = result;
 
             return descriptors.Count != 0;
         }
