@@ -146,8 +146,7 @@ namespace Scrutor.Tests
     }
 
     #endregion
-
-    public class DecorationPerformanceTests : TestBase
+: TestBase
     {
         private readonly ITestOutputHelper _rOutput;
 
